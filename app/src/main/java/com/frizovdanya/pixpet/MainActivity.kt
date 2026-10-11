@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
-import android.graphics.Color as AndroidColor
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -84,17 +83,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.Fill
-import androidx.compose.ui.graphics.drawscope.scale
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.text.font.FontWeight
@@ -104,7 +96,6 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import kotlin.math.min
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -141,6 +132,7 @@ private fun PixPetSettingsScreen() {
     var pendingAction by remember { mutableStateOf(PixPetContract.ACTION_START) }
     var pendingStart by remember { mutableStateOf(false) }
     var pendingNotificationEnable by remember { mutableStateOf(false) }
+    var pendingDanceEnable by remember { mutableStateOf(false) }
 
     DisposableEffect(prefs, context) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -196,6 +188,16 @@ private fun PixPetSettingsScreen() {
             scope.launch { snackbar.showSnackbar("Доступ к уведомлениям не включён") }
         }
         pendingNotificationEnable = false
+        if (pendingDanceEnable && notificationAccess) {
+            dance = true
+            prefs.edit().putBoolean(PetPrefs.DANCE, true).apply()
+        } else if (pendingDanceEnable) {
+            scope.launch { snackbar.showSnackbar("Без доступа к медиасессиям питомец не сможет определить музыку") }
+        }
+        pendingDanceEnable = false
+        if (notificationAccess && enabled) {
+            dispatchPetAction(context, PixPetContract.ACTION_SETTINGS_CHANGED, scope, snackbar)
+        }
     }
 
     fun requestStart(action: String) {
@@ -233,7 +235,7 @@ private fun PixPetSettingsScreen() {
                 title = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("PixPet", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                        Text("Пиксельный питомец", style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
+                        Text(stringResource(R.string.app_subtitle), style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = scheme.background),
@@ -396,8 +398,19 @@ private fun PixPetSettingsScreen() {
                         SettingSwitchRow(Icons.Outlined.Vibration, "Тактильный отклик", "Лёгкая вибрация при касаниях", haptics) {
                             haptics = it; saveBoolean(PetPrefs.HAPTICS, it)
                         }
-                        SettingSwitchRow(Icons.Outlined.MusicNote, "Танцует под музыку", "Для Telegram-аудио нужен доступ к уведомлениям", dance) {
-                            dance = it; saveBoolean(PetPrefs.DANCE, it)
+                        SettingSwitchRow(
+                            Icons.Outlined.MusicNote,
+                            "Танцует под музыку",
+                            if (notificationAccess) "Реагирует на активные медиаплееры и меняет танцевальные движения" else "Разреши доступ к медиасессиям в блоке ниже — звук не записывается",
+                            dance,
+                        ) { checked ->
+                            if (checked && !notificationAccess) {
+                                pendingDanceEnable = true
+                                notificationAccessLauncher.launch(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                            } else {
+                                dance = checked
+                                saveBoolean(PetPrefs.DANCE, checked)
+                            }
                         }
                         SettingSwitchRow(Icons.Outlined.NotificationsActive, "Реакции на Telegram", "Распознаёт приветствия, смех и сердечки в уведомлениях", reactNotifications) {
                             if (it && !notificationAccess) {
@@ -419,10 +432,10 @@ private fun PixPetSettingsScreen() {
                             Icon(Icons.Outlined.NotificationsActive, contentDescription = null, tint = scheme.primary)
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text("Подключить уведомления", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                                Text("Доступ необязательный. Текст обрабатывается только на устройстве и не сохраняется.", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                                Text("Доступ для музыки и уведомлений", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                Text("Нужен для определения воспроизведения музыки и реакций на Telegram-уведомления. Текст проверяется локально и не сохраняется.", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
                             }
-                            OutlinedButton(onClick = { notificationAccessLauncher.launch(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }) { Text("Открыть") }
+                            OutlinedButton(onClick = { notificationAccessLauncher.launch(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }) { Text("Настроить") }
                         }
                     }
                 }
@@ -487,7 +500,7 @@ private fun PixPetSettingsScreen() {
                         Column {
                             Text("О PixPet", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = scheme.onPrimaryContainer)
                             Spacer(Modifier.height(4.dp))
-                            Text("Android-порт и приложение: @frizovdanya. Поведение и пиксельный образ основаны на Telegram-плагине Clawd 1.5 от @itskotovski.", style = MaterialTheme.typography.bodySmall, color = scheme.onPrimaryContainer)
+                            Text("PixPet создан @frizovdanya. Идея пиксельного питомца вдохновлена Telegram-плагином Clawd 1.5 от @itskotovski. Подробнее — в NOTICE.", style = MaterialTheme.typography.bodySmall, color = scheme.onPrimaryContainer)
                             Spacer(Modifier.height(6.dp))
                             Text("Версия ${BuildConfig.VERSION_NAME} · данные питомца хранятся локально", style = MaterialTheme.typography.labelSmall, color = scheme.onPrimaryContainer)
                         }
@@ -649,46 +662,30 @@ private fun StatTile(title: String, value: String, emoji: String, modifier: Modi
 
 @Composable
 private fun PixelPetPreview(species: PetSpecies, palette: Int, modifier: Modifier = Modifier) {
-    val bodyColors = listOf(
-        Color(0xFFD97757), Color(0xFF4FBF98), Color(0xFF9B8AEE), Color(0xFF4FA8E8), Color(0xFFEE85AE), Color(0xFF5E6670),
-    )
-    val body = bodyColors[palette.coerceIn(bodyColors.indices)]
-    val shadow = body.copy(alpha = 0.78f)
-    val eye = if (palette == 5) Color(0xFFF2F2F2) else Color(0xFF241916)
+    val pixelPaint = remember {
+        android.graphics.Paint().apply {
+            style = android.graphics.Paint.Style.FILL
+            isAntiAlias = false
+            isFilterBitmap = false
+        }
+    }
+    val previewFrame = remember(species, palette) {
+        PetFrame(expression = PetExpression.HAPPY, blush = true, phase = 0.4f)
+    }
     Canvas(modifier) {
-        val cell = min(size.width / 18f, size.height / 17f)
-        if (cell <= 0f) return@Canvas
-        val top = cell * 2f
-        fun pixel(x: Int, y: Int, w: Int = 1, h: Int = 1, color: Color = body) {
-            drawRect(color, Offset(x * cell, top + y * cell), Size(w * cell, h * cell))
+        drawIntoCanvas { canvas ->
+            PetRenderer.draw(
+                canvas = canvas.nativeCanvas,
+                paint = pixelPaint,
+                width = size.width,
+                height = size.height,
+                species = species,
+                palette = palette,
+                frame = previewFrame,
+                nowMs = 0L,
+                particles = emptyList(),
+            )
         }
-        when (species) {
-            PetSpecies.CAT -> {
-                pixel(14, 8, color = shadow); pixel(15, 7); pixel(16, 6, 1, 2, shadow)
-                pixel(4, 2, 1, 2, shadow); pixel(5, 1, 2); pixel(6, 0, color = shadow)
-                pixel(12, 1, 2); pixel(14, 2, 1, 2, shadow)
-                pixel(6, 2, color = Color(0xFFFFB1B8)); pixel(13, 2, color = Color(0xFFFFB1B8))
-            }
-            PetSpecies.DOG -> {
-                pixel(14, 6, 2, 1, shadow); pixel(15, 5, 2); pixel(16, 6, 1, 2, shadow)
-                pixel(2, 3, 2, 3, shadow); pixel(3, 6, 2, 2, shadow); pixel(14, 3, 2, 3, shadow)
-            }
-            PetSpecies.CLAWD -> Unit
-        }
-        val starts = intArrayOf(5, 4, 3, 3, 3, 3, 3, 4, 5)
-        starts.forEachIndexed { row, start -> pixel(start, row + 2, 18 - start * 2, color = body) }
-        pixel(4, 4, 2, 1, body.copy(alpha = 0.55f))
-        pixel(5, 11, color = body); pixel(8, 11, color = body); pixel(11, 11, color = body); pixel(14, 11, color = body)
-        pixel(5, 12, color = body); pixel(8, 12, color = body); pixel(11, 12, color = body); pixel(14, 12, color = body)
-        pixel(1, 7, 2, 2, body); pixel(15, 7, 2, 2, body)
-        pixel(6, 5, color = eye); pixel(11, 5, color = eye)
-        pixel(6, 6, color = eye); pixel(11, 6, color = eye)
-        if (species == PetSpecies.DOG) {
-            pixel(8, 7, 2, 1, Color(0xFFFFDAB7)); pixel(9, 7, color = eye)
-        } else {
-            pixel(8, 7, 2, 1, eye)
-        }
-        pixel(4, 7, 2, 1, Color(0x80FF6A84)); pixel(12, 7, 2, 1, Color(0x80FF6A84))
     }
 }
 

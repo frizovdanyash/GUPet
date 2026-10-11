@@ -18,6 +18,9 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.media.session.MediaController
+import android.media.session.MediaSessionManager
+import android.media.session.PlaybackState
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -122,6 +125,12 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
     private var tilt = 0f
     private var rotation = Surface.ROTATION_0
     private var mediaPlaying = false
+    private var mediaSessionManager: MediaSessionManager? = null
+    private var mediaSessionsListener: MediaSessionManager.OnActiveSessionsChangedListener? = null
+    private var mediaListenerRegistered = false
+    private val activeMediaControllers = mutableListOf<MediaController>()
+    private val mediaControllerCallbacks = mutableMapOf<MediaController, MediaController.Callback>()
+    private var mediaRetryCount = 0
 
     private var screenWidth = 0
     private var screenHeight = 0
@@ -179,10 +188,12 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
     private val recentTaps = mutableListOf<Long>()
     private var nextExternalReactionAt = 0L
     private var lastPhrase: String? = null
+    private var idlePose = PetPose.IDLE
+    private var idlePoseStartedAt = 0L
+    private var idlePoseUntil = 0L
     private var bubbleUntil = 0L
     private var bubbleVisible = false
     private var bubbleFadeIn = false
-    private var nextChatLikeIdlePhrase = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -226,6 +237,7 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
             PixPetContract.ACTION_SETTINGS_CHANGED -> applySettings(PetPrefs.load(prefs))
         }
         registerSensorIfNeeded()
+        updateMediaMonitor()
         scheduleTick(0L)
         return START_STICKY
     }
@@ -240,6 +252,8 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
             configRegistered = false
         }
         unregisterPrivateReceiver()
+        handler.removeCallbacks(mediaRetry)
+        unregisterMediaMonitor()
         unregisterSensor()
         cleanAllPoops(animated = false, count = false)
         particles.clear()
@@ -288,7 +302,6 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
             velocityY = 0f
             state = State.FLY
         }
-        if (!fresh.dance) mediaPlaying = false
         if (!fresh.phrases) hideBubble()
         if (state == State.SLEEP && (fresh.sleepMinutes == 0 || SystemClock.elapsedRealtime() - lastInteractionAt < fresh.sleepMinutes * 60_000L)) {
             state = State.IDLE
@@ -296,6 +309,7 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
         }
         if (!fresh.gravity) slideVelocity = 0f
         registerSensorIfNeeded()
+        updateMediaMonitor()
         petView?.invalidate()
         scheduleTick(0L)
     }
@@ -305,12 +319,7 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
             addAction(PixPetContract.ACTION_REACTION)
             addAction(PixPetContract.ACTION_MEDIA)
         }
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(privateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            registerReceiver(privateReceiver, filter)
-        }
+        ContextCompat.registerReceiver(this, privateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         receiverRegistered = true
     }
 
@@ -329,7 +338,15 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
         val view = PetArtView(this).apply {
             species = settings.species
             paletteIndex = settings.palette
-            setOnTouchListener { _, event -> onPetTouch(event) }
+            contentDescription = "Пиксельный питомец"
+            setOnClickListener { onTap(SystemClock.elapsedRealtime()) }
+            setOnTouchListener { touchedView, event ->
+                val isShortTap = event.actionMasked == MotionEvent.ACTION_UP && state == State.PRESS &&
+                    SystemClock.elapsedRealtime() - (touch?.downAt ?: SystemClock.elapsedRealtime()) < LONG_PRESS_MS
+                val handled = onPetTouch(event)
+                if (isShortTap) touchedView.performClick()
+                handled
+            }
         }
         val params = overlayParams(windowWidth, windowHeight, touchable = true)
         try {
@@ -493,6 +510,9 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
         lastTickAt = now
         lastInteractionAt = now
         nextActionAt = now + 3_500L
+        idlePose = PetPose.IDLE
+        idlePoseStartedAt = 0L
+        idlePoseUntil = 0L
         nextBlinkAt = now + 2_000L
         blinkUntil = 0L
         nextHeartAt = now
@@ -653,7 +673,16 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
         if (now < nextActionAt || hopActive) return
         nextActionAt = now + randomBetween(3_500L, 9_000L)
         if (!settings.wander) {
-            if (Random.nextFloat() < 0.55f) look = Random.nextInt(-1, 2)
+            when (Random.nextInt(100)) {
+                in 0..18 -> look = Random.nextInt(-1, 2)
+                in 19..40 -> say("idle")
+                in 41..56 -> hop(dpFloat(280f))
+                in 57..66 -> waveUntil = now + 1_600L
+                in 67..75 -> playIdlePose(PetPose.STRETCH, 1_400L, "stretch", now)
+                in 76..84 -> playIdlePose(PetPose.YAWN, 1_200L, "yawn", now)
+                in 85..93 -> playIdlePose(PetPose.GROOM, 1_800L, "groom", now)
+                else -> playIdlePose(PetPose.SPIN, 900L, "spin", now)
+            }
             return
         }
 
@@ -667,16 +696,28 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
         }
 
         when (Random.nextInt(100)) {
-            in 0..34 -> {
+            in 0..28 -> {
                 val distance = dpFloat(Random.nextInt(45, 155).toFloat()) * if (Random.nextBoolean()) 1f else -1f
                 walkTarget = (posX + distance).coerceIn(minX, maxX)
                 if (abs(walkTarget - posX) > dpFloat(12f)) state = State.WALK
             }
-            in 35..51 -> look = Random.nextInt(-1, 2)
-            in 52..66 -> say("idle")
-            in 67..82 -> hop(dpFloat(330f))
-            else -> waveUntil = now + 1_600L
+            in 29..39 -> look = Random.nextInt(-1, 2)
+            in 40..53 -> say("idle")
+            in 54..67 -> hop(dpFloat(330f))
+            in 68..75 -> waveUntil = now + 1_600L
+            in 76..81 -> playIdlePose(PetPose.STRETCH, 1_400L, "stretch", now)
+            in 82..87 -> playIdlePose(PetPose.YAWN, 1_200L, "yawn", now)
+            in 88..93 -> playIdlePose(PetPose.GROOM, 1_800L, "groom", now)
+            else -> playIdlePose(PetPose.SPIN, 900L, "spin", now)
         }
+    }
+
+    private fun playIdlePose(pose: PetPose, durationMs: Long, phrase: String, now: Long) {
+        idlePose = pose
+        idlePoseStartedAt = now
+        idlePoseUntil = now + durationMs
+        nextActionAt = max(nextActionAt, now + durationMs + randomBetween(1_500L, 3_000L))
+        say(phrase)
     }
 
     private fun stepFlight(dt: Float, now: Long) {
@@ -888,7 +929,8 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
                             endPet(now)
                         } else {
                             state = State.IDLE
-                            if (!cancelled) onTap(now)
+                            // The touch listener forwards a short tap through performClick(),
+                            // which also keeps accessibility services able to trigger the same action.
                         }
                     }
                     else -> state = State.IDLE
@@ -1246,7 +1288,11 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
             State.SLEEP -> PetPose.SLEEP
             State.HANG -> PetPose.HANG
             State.PEEK -> PetPose.PEEK
-            State.IDLE -> PetPose.IDLE
+            State.IDLE -> when {
+                mediaPlaying && settings.dance -> musicPose(now)
+                now < idlePoseUntil -> idlePose
+                else -> PetPose.IDLE
+            }
         }
         var face = when {
             state == State.SLEEP -> PetExpression.SLEEP
@@ -1265,6 +1311,8 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
         when {
             state == State.FLY -> rotation = (velocityX / dpFloat(70f)).coerceIn(-25f, 25f)
             state == State.HANG -> rotation = (sin((now - hangStartedAt) / 1_000f * 3f) * 6f)
+            pose == PetPose.SPIN && mediaPlaying && state == State.IDLE -> rotation = ((now % 2_400L) / 2_400f) * 360f
+            pose == PetPose.SPIN && now < idlePoseUntil -> rotation = (((now - idlePoseStartedAt).coerceAtLeast(0L) % 900L) / 900f) * 360f
             slideVelocity != 0f -> rotation = (-slideVelocity / dpFloat(30f)).coerceIn(-12f, 12f)
             expression == PetExpression.DIZZY && now < expressionUntil -> rotation = sin(now / 100f) * 7f
             mediaPlaying && state == State.IDLE -> rotation = sin(now / 250f) * 5f
@@ -1280,7 +1328,7 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
             expression = face,
             look = look,
             waveSide = waveSide,
-            blush = state == State.PET || face == PetExpression.HAPPY,
+            blush = state == State.PET || face == PetExpression.HAPPY || pose == PetPose.DANCE,
             mouthOpen = now < mouthOpenUntil || (state == State.PET && (now / 180L) % 2L == 0L),
             squash = squash,
             rotation = rotation,
@@ -1327,19 +1375,154 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
         scheduleTick(0L)
     }
 
+    private val mediaRetry = object : Runnable {
+        override fun run() {
+            if (running && settings.dance) updateMediaMonitor()
+        }
+    }
+
+    private fun hasMediaSessionAccess(): Boolean {
+        val enabled = Settings.Secure.getString(contentResolver, "enabled_notification_listeners").orEmpty()
+        val expected = ComponentName(this, PetNotificationListenerService::class.java)
+        return enabled.split(':').any { ComponentName.unflattenFromString(it) == expected }
+    }
+
+    private fun updateMediaMonitor() {
+        if (!running || !settings.dance || !hasMediaSessionAccess()) {
+            handler.removeCallbacks(mediaRetry)
+            mediaRetryCount = 0
+            unregisterMediaMonitor()
+            setMediaPlaying(false)
+            return
+        }
+        val manager = getSystemService(MediaSessionManager::class.java) ?: return
+        val component = ComponentName(this, PetNotificationListenerService::class.java)
+        if (!mediaListenerRegistered) {
+            val listener = MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
+                syncMediaControllers(controllers)
+            }
+            try {
+                manager.addOnActiveSessionsChangedListener(listener, component, handler)
+                mediaSessionManager = manager
+                mediaSessionsListener = listener
+                mediaListenerRegistered = true
+                mediaRetryCount = 0
+            } catch (_: SecurityException) {
+                scheduleMediaRetry()
+                return
+            } catch (_: RuntimeException) {
+                scheduleMediaRetry()
+                return
+            }
+        }
+        try {
+            syncMediaControllers(manager.getActiveSessions(component))
+        } catch (_: SecurityException) {
+            scheduleMediaRetry()
+        } catch (_: RuntimeException) {
+            scheduleMediaRetry()
+        }
+    }
+
+    private fun scheduleMediaRetry() {
+        if (!running || !settings.dance || !hasMediaSessionAccess() || mediaRetryCount >= 8) return
+        mediaRetryCount++
+        handler.removeCallbacks(mediaRetry)
+        handler.postDelayed(mediaRetry, 1_250L)
+    }
+
+    private fun syncMediaControllers(controllers: List<MediaController>?) {
+        val current = controllers.orEmpty().filter { it.packageName != packageName }
+        val keep = current.toSet()
+        mediaControllerCallbacks.keys.filter { it !in keep }.toList().forEach { controller ->
+            val callback = mediaControllerCallbacks.remove(controller) ?: return@forEach
+            try { controller.unregisterCallback(callback) } catch (_: RuntimeException) { }
+        }
+        current.forEach { controller ->
+            if (!mediaControllerCallbacks.containsKey(controller)) {
+                val callback = object : MediaController.Callback() {
+                    override fun onPlaybackStateChanged(state: PlaybackState?) {
+                        refreshMediaPlayback()
+                    }
+                    override fun onSessionDestroyed() {
+                        handler.post { refreshActiveMediaSessions() }
+                    }
+                }
+                try {
+                    controller.registerCallback(callback, handler)
+                    mediaControllerCallbacks[controller] = callback
+                } catch (_: RuntimeException) { }
+            }
+        }
+        activeMediaControllers.clear()
+        activeMediaControllers.addAll(current)
+        refreshMediaPlayback()
+    }
+
+    private fun refreshActiveMediaSessions() {
+        val manager = mediaSessionManager ?: return
+        try {
+            syncMediaControllers(manager.getActiveSessions(ComponentName(this, PetNotificationListenerService::class.java)))
+        } catch (_: SecurityException) {
+            scheduleMediaRetry()
+        } catch (_: RuntimeException) {
+            scheduleMediaRetry()
+        }
+    }
+
+    private fun refreshMediaPlayback() {
+        val playing = activeMediaControllers.any { controller ->
+            when (controller.playbackState?.state) {
+                PlaybackState.STATE_PLAYING,
+                PlaybackState.STATE_BUFFERING,
+                PlaybackState.STATE_FAST_FORWARDING,
+                PlaybackState.STATE_REWINDING -> true
+                else -> false
+            }
+        }
+        setMediaPlaying(playing)
+    }
+
+    private fun unregisterMediaMonitor() {
+        val manager = mediaSessionManager
+        val listener = mediaSessionsListener
+        if (manager != null && listener != null && mediaListenerRegistered) {
+            try { manager.removeOnActiveSessionsChangedListener(listener) } catch (_: RuntimeException) { }
+        }
+        mediaControllerCallbacks.toList().forEach { (controller, callback) ->
+            try { controller.unregisterCallback(callback) } catch (_: RuntimeException) { }
+        }
+        mediaControllerCallbacks.clear()
+        activeMediaControllers.clear()
+        mediaSessionManager = null
+        mediaSessionsListener = null
+        mediaListenerRegistered = false
+    }
+
+    private fun musicPose(now: Long): PetPose = when ((now / 700L) % 10L) {
+        4L -> PetPose.STRETCH
+        7L -> PetPose.SPIN
+        9L -> PetPose.GROOM
+        else -> PetPose.DANCE
+    }
+
     private fun setMediaPlaying(playing: Boolean) {
-        if (!settings.dance || !running || mediaPlaying == playing) return
+        if (!running || mediaPlaying == playing || (playing && !settings.dance)) return
         mediaPlaying = playing
         val now = SystemClock.elapsedRealtime()
         if (playing) {
             lastInteractionAt = now
-            nextNoteAt = now + 300L
+            nextNoteAt = now + 250L
+            idlePoseUntil = 0L
+            idlePose = PetPose.IDLE
             if (state == State.SLEEP) state = State.IDLE
             if (state == State.PEEK) endPeek(now)
             say("music")
         } else {
+            idlePoseUntil = 0L
+            idlePose = PetPose.IDLE
             nextActionAt = now + randomBetween(2_000L, 4_000L)
-            if (Random.nextFloat() < 0.5f) say("music_end")
+            if (Random.nextFloat() < 0.7f) say("music_end")
         }
         scheduleTick(0L)
     }
@@ -1514,30 +1697,34 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
         private const val EARTH_G = 9.81f
 
         private val PHRASES = mapOf(
-            "hello" to listOf("Привет!", "Я PixPet!", "О, это ты!"),
-            "idle" to listOf("Чем займёмся?", "Хм…", "Думаю…", "Можно я тут посижу?", "Не забудь попить воды", "Пип-пип!", "*оглядывается*", "Пишу код… шучу"),
-            "tap" to listOf("Ой!", "Эй!", "Чего?", "Я тут!", "Хи!"),
-            "annoyed" to listOf("Хватит тыкать!", "Щекотно же!", "Ну всё, обиделся", "Эй, полегче!"),
-            "pet" to listOf("Мрр…", "Ещё!", "Приятно ♥", "Хи-хи", "Лучший день!", "♥♥♥"),
-            "drag" to listOf("Ааа!", "Куда мы?", "Поставь меня!"),
-            "throw" to listOf("Уиии!", "Я лечу!", "Ваааа!"),
-            "dizzy" to listOf("Голова кружится…", "@_@", "Где я?"),
-            "wake" to listOf("А? Что?", "Я не спал!", "*зевает*"),
-            "jump" to listOf("Хоп!", "Йе!", "Ура!"),
-            "mail" to listOf("Тебе пишут!", "Сообщение!", "Кто-то написал!", "Динь-динь!"),
-            "love" to listOf("Ааа, мило ♥", "♥♥♥", "Как трогательно!", "Любовь!"),
-            "laugh" to listOf("Ахаха!", "Хи-хи-хи", "Смешно!", "Ха-ха!"),
-            "hi" to listOf("Привет-привет!", "И тебе привет!", "Здрасьте!", "*машет*"),
-            "music" to listOf("О, музыка!", "Танцуем!", "Это мой трек!", "♪♪♪"),
-            "music_end" to listOf("Эх, закончилось", "Ещё!", "Хороший трек"),
-            "shake" to listOf("Аааа!", "Землетрясение!", "Хватит трясти!", "Уоооу!"),
-            "slide" to listOf("Скользко!", "Уиии~", "Меня несёт!"),
-            "hang" to listOf("Держусь!", "Помогите!", "Высоковато…", "Не отпущу!"),
-            "hang_fall" to listOf("Ой-ой-ой!", "Не удержался!", "Падаю!"),
-            "peek" to listOf("Ку-ку!", "Я тебя вижу", "*подглядывает*", "Ты тут?"),
-            "found" to listOf("Нашёл меня!", "Эх, раскусил", "Я просто смотрел!"),
-            "poop" to listOf("Упс…", "Это не я!", "Ой…", "*краснеет*"),
-            "clean" to listOf("Спасибо!", "Прости…", "Больше не буду!", "Ты лучший"),
+            "hello" to listOf("Привет!", "Я PixPet!", "О, это ты!", "Ну здравствуй, человек", "Я уже заждался", "Давай проведём день вместе", "Мяу! То есть… привет!", "Привет-привет, я на посту!"),
+            "idle" to listOf("Чем займёмся?", "Хм…", "Думаю…", "Можно я тут посижу?", "Не забудь попить воды", "Пип-пип!", "*оглядывается*", "Пишу код… шучу", "Интересно, что там дальше", "Я охраняю экран", "Кажется, я слышал шорох", "Кто-нибудь видел мой хвост?", "Пора размять лапки", "Проверка пикселей: всё на месте", "А у тебя уютный экран", "Я считаю облака. Раз… пиксель… два…", "Надо бы устроить маленькое приключение", "Я здесь, если что", "Люблю тихие минутки", "Кажется, день обещает быть хорошим", "Не отвлекайся, я присмотрю за всем", "Хочу чего-нибудь интересного", "*подмигивает*", "Секунду, я красиво сяду", "Какой сегодня чудесный фон!", "Здесь так много места для прогулки", "Пиксель к пикселю — и красота", "У меня лапки, но планы большие", "Ты занят? Я могу подождать", "Пожалуй, немного помурчу"),
+            "tap" to listOf("Ой!", "Эй!", "Чего?", "Я тут!", "Хи!", "Поймал!", "Это было неожиданно", "Тук-тук, я отвечаю", "Лапкой привет!", "Не щекочи меня", "Опять ты!", "Ты хотел что-то сказать?"),
+            "annoyed" to listOf("Хватит тыкать!", "Щекотно же!", "Ну всё, обиделся", "Эй, полегче!", "Я вообще-то нежный", "Лапки просят передышку", "Ещё раз — и я спрячусь", "Так, это уже третий тык!", "Осторожно, я могу рассмеяться", "Ну ладно, ещё разок"),
+            "pet" to listOf("Мрр…", "Ещё!", "Приятно ♥", "Хи-хи", "Лучший день!", "♥♥♥", "Вот это сервис!", "Попал в любимое место", "Я сейчас растаю", "Ты самый лучший", "Мур-мур-мур", "Можно ещё немного?", "Так уютно!", "Вот за это я тебя и люблю"),
+            "drag" to listOf("Ааа!", "Куда мы?", "Поставь меня!", "Осторожно, я лечу", "Держи меня покрепче", "Экскурсия без предупреждения?", "Вверх, вниз… вау", "Я не чемодан!", "О, новый вид сверху", "А лапки можно на землю?"),
+            "throw" to listOf("Уиии!", "Я лечу!", "Ваааа!", "Полёт нормальный!", "Лапки вверх!", "Это был запуск?", "Становлюсь пиксельной кометой", "Ловиии меня!", "Вот это ускорение!", "Приземлюсь красиво!"),
+            "dizzy" to listOf("Голова кружится…", "@_@", "Где я?", "Мир стал квадратным", "Мне нужны минутка и печенька", "Все пиксели поплыли", "Вижу сразу три экрана", "Крутится, вертится…", "Пожалуй, посижу", "Надо было пристегнуться"),
+            "wake" to listOf("А? Что?", "Я не спал!", "*зевает*", "Доброе… какое сейчас время?", "Пять минут полежу", "Уже утро?", "Я просто моргал подольше", "Снились рыбки из пикселей", "О, ты вернулся!", "Сейчас проснусь окончательно"),
+            "jump" to listOf("Хоп!", "Йе!", "Ура!", "Выше облаков!", "Лапки от земли!", "Пружинка включена", "Ещё один маленький прыжок", "Посмотри, как умею!", "Три, два, прыжок!", "Уиии!"),
+            "mail" to listOf("Тебе пишут!", "Сообщение!", "Кто-то написал!", "Динь-динь!", "Пиликнуло!", "Кажется, пришла новость", "Проверь уведомления", "Там кто-то ждёт ответа", "У тебя новое сообщение", "Я услышал цифровой звонок"),
+            "love" to listOf("Ааа, мило ♥", "♥♥♥", "Как трогательно!", "Любовь!", "Сердечко принято!", "Отправляю обнимашки", "У меня внутри стало тепло", "Вот это нежность", "Сохраняю в своё пиксельное сердце", "Я тоже тебя люблю ♥"),
+            "laugh" to listOf("Ахаха!", "Хи-хи-хи", "Смешно!", "Ха-ха!", "Не могу остановиться!", "Ещё одну шутку!", "Пиксельный юмор — лучший", "Фыр-фыр-фыр", "У меня аж хвост подпрыгнул", "Запомню эту шутку"),
+            "hi" to listOf("Привет-привет!", "И тебе привет!", "Здрасьте!", "*машет*", "Хай!", "Рад тебя видеть", "Лапкой машу!", "Салют!", "Привет, мой друг", "Увидел тебя и обрадовался"),
+            "music" to listOf("О, музыка!", "Танцуем!", "Это мой трек!", "♪♪♪", "Бит пойман!", "Включаю лапки", "У этой песни отличный ритм", "Подпеваю пикселями", "Музыка — моя стихия", "Давай качать хвостом", "Топ-топ в такт", "О, знакомая мелодия?"),
+            "music_end" to listOf("Эх, закончилось", "Ещё!", "Хороший трек", "Можно повтор?", "Тишина тоже неплоха", "Спасибо за концерт", "Я ещё немного потанцую", "Какая песня будет следующей?"),
+            "shake" to listOf("Аааа!", "Землетрясение!", "Хватит трясти!", "Уоооу!", "Мир покачнулся", "Проверка на прочность пройдена", "Я почти взлетел", "Так, ставлю лапы шире", "Земля, не уходи!", "Пожалуйста, предупреди в следующий раз"),
+            "slide" to listOf("Скользко!", "Уиии~", "Меня несёт!", "Ветер в усах!", "Лапки не тормозят", "Я всё контролирую… почти", "Съезжаю по экрану", "Держись, хвост!"),
+            "hang" to listOf("Держусь!", "Помогите!", "Высоковато…", "Не отпущу!", "Лапки крепкие", "Я тут просто выглядываю", "С краешка всё видно", "Осторожно, хвост свисает"),
+            "hang_fall" to listOf("Ой-ой-ой!", "Не удержался!", "Падаю!", "Незапланированное приземление", "Приземление мягкое?", "Фух, я в порядке", "Поймал равновесие!"),
+            "peek" to listOf("Ку-ку!", "Я тебя вижу", "*подглядывает*", "Ты тут?", "Пик!", "А вот и я", "Выглянул на секунду", "Не искал меня?", "Секретный наблюдатель на связи", "Край экрана — хорошее укрытие"),
+            "found" to listOf("Нашёл меня!", "Эх, раскусил", "Я просто смотрел!", "Ладно, сдаюсь", "Как ты догадался?", "Я почти не прятался", "Ты очень внимательный", "Пойман с поличным!"),
+            "poop" to listOf("Упс…", "Это не я!", "Ой…", "*краснеет*", "Кажется, тут нужна уборка", "Я оставил маленький сюрприз", "Не наступи, пожалуйста", "Сделаю вид, что так и было", "Всё, теперь легче", "Прости за беспорядок!"),
+            "clean" to listOf("Спасибо!", "Прости…", "Больше не буду!", "Ты лучший", "Чистота — красота", "Вот теперь снова уютно", "Уборка прошла успешно", "Спасибо за заботу ♥", "Лапки говорят спасибо", "Порядок восстановлен!"),
+            "stretch" to listOf("Потягушки!", "Разминаю каждую лапку", "После прогулки самое то", "Спина говорит спасибо", "Потянулся — и день лучше", "Вот теперь я готов к делам"),
+            "yawn" to listOf("Ох, сладко зевнул", "Кажется, пора отдохнуть", "Зевота заразительная", "Ещё не сплю, просто зеваю", "Ммм, как хорошо потянуться", "Сон пока подождёт"),
+            "groom" to listOf("Навожу красоту", "Усы на месте, хвост на месте", "Пора умыть лапки", "Кто тут самый пушистый?", "Проверка шерсти завершена", "Красота требует внимания"),
+            "spin" to listOf("Кручусь!", "Танцевальный поворот", "Вжух — и другой бок", "Пируэт почти идеальный", "Не кружится? Тогда ещё раз", "Тадам!"),
         )
     }
 }
