@@ -1,0 +1,14 @@
+# Gradle / Android build products
+.gradle/
+**/build/
+local.properties
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# IDE and local machine state
+.idea/
+*.iml
+.DS_Store
+Thumbs.db

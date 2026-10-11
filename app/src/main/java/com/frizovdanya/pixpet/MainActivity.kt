@@ -1,0 +1,712 @@
+package com.frizovdanya.pixpet
+
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.graphics.Color as AndroidColor
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.provider.Settings
+import android.provider.Settings.Secure
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Bedtime
+import androidx.compose.material.icons.outlined.CenterFocusStrong
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.CleaningServices
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Pets
+import androidx.compose.material.icons.outlined.Sensors
+import androidx.compose.material.icons.outlined.Smartphone
+import androidx.compose.material.icons.outlined.Vibration
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import kotlin.math.min
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent { PixPetTheme { PixPetSettingsScreen() } }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PixPetSettingsScreen() {
+    val context = LocalContext.current
+    val prefs = remember { PetPrefs.file(context) }
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    var overlayGranted by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
+    var notificationAccess by remember { mutableStateOf(hasNotificationAccess(context)) }
+    var enabled by remember { mutableStateOf(prefs.getBoolean(PetPrefs.SHOW, false)) }
+    var poopEnabled by remember { mutableStateOf(prefs.getBoolean(PetPrefs.POOP, true)) }
+    var species by remember { mutableStateOf(PetSpecies.fromKey(prefs.getString(PetPrefs.SPECIES, PetSpecies.CLAWD.key))) }
+    var palette by remember { mutableIntStateOf(prefs.getInt(PetPrefs.PALETTE, 0).coerceIn(0, PetPalettes.names.lastIndex)) }
+    var sizeDp by remember { mutableFloatStateOf(prefs.getFloat(PetPrefs.SIZE_DP, 4f).coerceIn(3f, 5f)) }
+    var wander by remember { mutableStateOf(prefs.getBoolean(PetPrefs.WANDER, true)) }
+    var phrases by remember { mutableStateOf(prefs.getBoolean(PetPrefs.PHRASES, true)) }
+    var gravity by remember { mutableStateOf(prefs.getBoolean(PetPrefs.GRAVITY, false)) }
+    var shake by remember { mutableStateOf(prefs.getBoolean(PetPrefs.SHAKE, true)) }
+    var haptics by remember { mutableStateOf(prefs.getBoolean(PetPrefs.HAPTICS, true)) }
+    var dance by remember { mutableStateOf(prefs.getBoolean(PetPrefs.DANCE, true)) }
+    var reactNotifications by remember { mutableStateOf(prefs.getBoolean(PetPrefs.REACT_NOTIFICATIONS, false)) }
+    var sleepMinutes by remember { mutableIntStateOf(prefs.getInt(PetPrefs.SLEEP_MINUTES, 3).coerceIn(0, 10)) }
+    var petsCount by remember { mutableIntStateOf(prefs.getInt(PetPrefs.PETS_COUNT, 0)) }
+    var poopsCleaned by remember { mutableIntStateOf(prefs.getInt(PetPrefs.POOPS_CLEANED, 0)) }
+    var pendingAction by remember { mutableStateOf(PixPetContract.ACTION_START) }
+    var pendingStart by remember { mutableStateOf(false) }
+    var pendingNotificationEnable by remember { mutableStateOf(false) }
+
+    DisposableEffect(prefs, context) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            when (key) {
+                PetPrefs.PETS_COUNT -> petsCount = prefs.getInt(PetPrefs.PETS_COUNT, 0)
+                PetPrefs.POOPS_CLEANED -> poopsCleaned = prefs.getInt(PetPrefs.POOPS_CLEANED, 0)
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        dispatchPetAction(context, pendingAction, scope, snackbar)
+    }
+
+    fun enableAndStart(action: String) {
+        enabled = true
+        prefs.edit().putBoolean(PetPrefs.SHOW, true).apply()
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            pendingAction = action
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            dispatchPetAction(context, action, scope, snackbar)
+        }
+    }
+
+    val overlayPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        overlayGranted = Settings.canDrawOverlays(context)
+        if (overlayGranted && pendingStart) {
+            pendingStart = false
+            enableAndStart(pendingAction)
+        } else if (!overlayGranted) {
+            pendingStart = false
+            scope.launch { snackbar.showSnackbar("Разрешение на отображение поверх приложений не выдано") }
+        }
+    }
+
+    val notificationAccessLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        notificationAccess = hasNotificationAccess(context)
+        if (pendingNotificationEnable && notificationAccess) {
+            reactNotifications = true
+            prefs.edit().putBoolean(PetPrefs.REACT_NOTIFICATIONS, true).apply()
+        } else if (pendingNotificationEnable) {
+            reactNotifications = false
+            scope.launch { snackbar.showSnackbar("Доступ к уведомлениям не включён") }
+        }
+        pendingNotificationEnable = false
+    }
+
+    fun requestStart(action: String) {
+        if (action == PixPetContract.ACTION_POOP_NOW && !poopEnabled) {
+            scope.launch { snackbar.showSnackbar("Сначала включи функцию кучек") }
+            return
+        }
+        if (!Settings.canDrawOverlays(context)) {
+            pendingAction = action
+            pendingStart = true
+            overlayPermissionLauncher.launch(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")),
+            )
+            return
+        }
+        overlayGranted = true
+        enableAndStart(action)
+    }
+
+    fun stopPet() {
+        enabled = false
+        prefs.edit().putBoolean(PetPrefs.SHOW, false).apply()
+        context.stopService(Intent(context, OverlayPetService::class.java))
+    }
+
+    fun saveBoolean(key: String, value: Boolean) {
+        prefs.edit().putBoolean(key, value).apply()
+    }
+
+    val scheme = MaterialTheme.colorScheme
+    Scaffold(
+        contentWindowInsets = WindowInsets.statusBars,
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("PixPet", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                        Text("Пиксельный питомец", style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = scheme.background),
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbar) },
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = innerPadding.calculateTopPadding() + 8.dp, bottom = 24.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            item {
+                HeroCard(
+                    enabled = enabled,
+                    overlayGranted = overlayGranted,
+                    species = species,
+                    palette = palette,
+                    onToggle = { checked ->
+                        if (checked) requestStart(PixPetContract.ACTION_START) else stopPet()
+                    },
+                )
+            }
+
+            item {
+                AnimatedVisibility(visible = !overlayGranted) {
+                    Card(
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(containerColor = scheme.tertiaryContainer),
+                    ) {
+                        Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Smartphone, contentDescription = null, tint = scheme.onTertiaryContainer, modifier = Modifier.size(28.dp))
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Нужно разрешение", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = scheme.onTertiaryContainer)
+                                Text("Android попросит разрешить PixPet показываться поверх других приложений.", style = MaterialTheme.typography.bodySmall, color = scheme.onTertiaryContainer)
+                            }
+                            Button(onClick = { requestStart(PixPetContract.ACTION_START) }) { Text("Разрешить") }
+                        }
+                    }
+                }
+            }
+
+            item { SectionTitle("Выбери питомца", "Классический Clawd, кошка или собака", Icons.Outlined.Pets) }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    PetSpecies.entries.forEach { item ->
+                        SpeciesCard(
+                            species = item,
+                            selected = species == item,
+                            palette = palette,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                species = item
+                                prefs.edit().putString(PetPrefs.SPECIES, item.key).apply()
+                            },
+                        )
+                    }
+                }
+            }
+
+            item {
+                Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainerLow)) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Palette, contentDescription = null, tint = scheme.primary)
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text("Окрас", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Text(PetPalettes.names[palette], style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            PALETTE_COLORS.forEachIndexed { index, color ->
+                                PaletteSwatch(
+                                    color = color,
+                                    selected = palette == index,
+                                    label = PetPalettes.names[index],
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        palette = index
+                                        prefs.edit().putInt(PetPrefs.PALETTE, index).apply()
+                                    },
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(2.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Размер", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            Text("${sizeDp.toInt()} dp", style = MaterialTheme.typography.labelLarge, color = scheme.primary)
+                        }
+                        Slider(
+                            value = sizeDp,
+                            onValueChange = { sizeDp = it },
+                            onValueChangeFinished = { prefs.edit().putFloat(PetPrefs.SIZE_DP, sizeDp).apply() },
+                            valueRange = 3f..5f,
+                            steps = 1,
+                        )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Маленький", style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
+                            Text("Большой", style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+
+            item { SectionTitle("Кучки", "Можно вызвать в любой момент и убрать одним касанием", Icons.Outlined.CleaningServices) }
+            item {
+                Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = scheme.secondaryContainer)) {
+                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("💩", fontSize = 28.sp)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Питомец может покакать", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = scheme.onSecondaryContainer)
+                                Text("Самостоятельно время от времени или по твоей команде.", style = MaterialTheme.typography.bodySmall, color = scheme.onSecondaryContainer)
+                            }
+                            Switch(checked = poopEnabled, onCheckedChange = {
+                                poopEnabled = it
+                                saveBoolean(PetPrefs.POOP, it)
+                            })
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                            FilledTonalButton(
+                                onClick = { requestStart(PixPetContract.ACTION_POOP_NOW) },
+                                enabled = poopEnabled,
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                            ) { Text("Покакать сейчас", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                            OutlinedButton(
+                                onClick = {
+                                    if (enabled) dispatchPetAction(context, PixPetContract.ACTION_CLEAN_POOPS, scope, snackbar)
+                                    else scope.launch { snackbar.showSnackbar("Сначала включи питомца") }
+                                },
+                                enabled = enabled,
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                            ) { Text("Убрать кучки", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        }
+                    }
+                }
+            }
+
+            item { SectionTitle("Поведение", "Питомец живёт своей маленькой жизнью", Icons.Outlined.AutoAwesome) }
+            item {
+                Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainerLow)) {
+                    Column {
+                        SettingSwitchRow(Icons.Outlined.AutoAwesome, "Гуляет сам", "Ходит, прыгает, машет и иногда выглядывает из-за края", wander) {
+                            wander = it; saveBoolean(PetPrefs.WANDER, it)
+                        }
+                        SettingSwitchRow(Icons.Outlined.ChatBubbleOutline, "Реплики", "Короткие облачка во время игры", phrases) {
+                            phrases = it; saveBoolean(PetPrefs.PHRASES, it)
+                        }
+                        SettingSwitchRow(Icons.Outlined.Sensors, "Гравитация и наклон", "Падает вниз и скользит, если наклонить телефон", gravity) {
+                            gravity = it; saveBoolean(PetPrefs.GRAVITY, it)
+                        }
+                        SettingSwitchRow(Icons.Outlined.Smartphone, "Реагирует на встряхивание", "Потряси телефон — питомец кувыркнётся", shake) {
+                            shake = it; saveBoolean(PetPrefs.SHAKE, it)
+                        }
+                        SettingSwitchRow(Icons.Outlined.Vibration, "Тактильный отклик", "Лёгкая вибрация при касаниях", haptics) {
+                            haptics = it; saveBoolean(PetPrefs.HAPTICS, it)
+                        }
+                        SettingSwitchRow(Icons.Outlined.MusicNote, "Танцует под музыку", "Для Telegram-аудио нужен доступ к уведомлениям", dance) {
+                            dance = it; saveBoolean(PetPrefs.DANCE, it)
+                        }
+                        SettingSwitchRow(Icons.Outlined.NotificationsActive, "Реакции на Telegram", "Распознаёт приветствия, смех и сердечки в уведомлениях", reactNotifications) {
+                            if (it && !notificationAccess) {
+                                pendingNotificationEnable = true
+                                notificationAccessLauncher.launch(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                            } else {
+                                reactNotifications = it
+                                saveBoolean(PetPrefs.REACT_NOTIFICATIONS, it)
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                AnimatedVisibility(visible = !notificationAccess) {
+                    Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainerLow)) {
+                        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.NotificationsActive, contentDescription = null, tint = scheme.primary)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Подключить уведомления", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                Text("Доступ необязательный. Текст обрабатывается только на устройстве и не сохраняется.", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                            }
+                            OutlinedButton(onClick = { notificationAccessLauncher.launch(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }) { Text("Открыть") }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainerLow)) {
+                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Bedtime, contentDescription = null, tint = scheme.primary)
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text("Когда засыпать", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Text(if (sleepMinutes == 0) "Не засыпает сам" else "После $sleepMinutes мин. бездействия", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            listOf(1, 3, 10, 0).forEach { minutes ->
+                                FilterChip(
+                                    selected = sleepMinutes == minutes,
+                                    onClick = {
+                                        sleepMinutes = minutes
+                                        prefs.edit().putInt(PetPrefs.SLEEP_MINUTES, minutes).apply()
+                                    },
+                                    label = { Text(if (minutes == 0) "Никогда" else "$minutes мин") },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            item { SectionTitle("Ещё", "Быстрые действия и статистика", Icons.Outlined.CenterFocusStrong) }
+            item {
+                Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainerLow)) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(
+                                onClick = { if (enabled) dispatchPetAction(context, PixPetContract.ACTION_RECENTER, scope, snackbar) },
+                                enabled = enabled,
+                                modifier = Modifier.weight(1f),
+                            ) { Icon(Icons.Outlined.CenterFocusStrong, contentDescription = null); Spacer(Modifier.width(7.dp)); Text("В центр") }
+                            FilledTonalButton(
+                                onClick = { if (enabled) stopPet() else requestStart(PixPetContract.ACTION_START) },
+                                modifier = Modifier.weight(1f),
+                            ) { Icon(Icons.Outlined.Pets, contentDescription = null); Spacer(Modifier.width(7.dp)); Text(if (enabled) "Спрятать" else "Позвать") }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                            StatTile("Погладили", petsCount.toString(), "💗", Modifier.weight(1f))
+                            StatTile("Убрано кучек", poopsCleaned.toString(), "🧹", Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+
+            item {
+                Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = scheme.primaryContainer)) {
+                    Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.Top) {
+                        Icon(Icons.Outlined.Info, contentDescription = null, tint = scheme.onPrimaryContainer)
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text("О PixPet", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = scheme.onPrimaryContainer)
+                            Spacer(Modifier.height(4.dp))
+                            Text("Android-порт и приложение: @frizovdanya. Поведение и пиксельный образ основаны на Telegram-плагине Clawd 1.5 от @itskotovski.", style = MaterialTheme.typography.bodySmall, color = scheme.onPrimaryContainer)
+                            Spacer(Modifier.height(6.dp))
+                            Text("Версия ${BuildConfig.VERSION_NAME} · данные питомца хранятся локально", style = MaterialTheme.typography.labelSmall, color = scheme.onPrimaryContainer)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HeroCard(
+    enabled: Boolean,
+    overlayGranted: Boolean,
+    species: PetSpecies,
+    palette: Int,
+    onToggle: (Boolean) -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Card(
+        shape = RoundedCornerShape(30.dp),
+        colors = CardDefaults.cardColors(containerColor = scheme.primaryContainer),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ) {
+        Box(
+            Modifier.fillMaxWidth().background(
+                Brush.linearGradient(listOf(scheme.primaryContainer, scheme.tertiaryContainer)),
+                RoundedCornerShape(30.dp),
+            ).padding(20.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("Твой маленький\nпиксельный друг", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = scheme.onPrimaryContainer)
+                    Text("Живёт поверх приложений — гуляет, прыгает и реагирует на тебя.", style = MaterialTheme.typography.bodyMedium, color = scheme.onPrimaryContainer)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(9.dp).clip(CircleShape).background(if (enabled) Color(0xFF258A58) else scheme.outline))
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            when {
+                                enabled && overlayGranted -> "Питомец на экране"
+                                !overlayGranted -> "Нужно разрешение Android"
+                                else -> "Питомец пока отдыхает"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = scheme.onPrimaryContainer,
+                        )
+                    }
+                    Spacer(Modifier.height(2.dp))
+                    FilledTonalButton(onClick = { onToggle(!enabled) }) {
+                        Icon(Icons.Outlined.Pets, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (enabled) "Спрятать питомца" else "Позвать питомца")
+                    }
+                }
+                Spacer(Modifier.width(6.dp))
+                PixelPetPreview(species, palette, Modifier.size(width = 112.dp, height = 110.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionTitle(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    val scheme = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth().padding(start = 4.dp, top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(38.dp).clip(CircleShape).background(scheme.primaryContainer), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = scheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(11.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun SpeciesCard(
+    species: PetSpecies,
+    selected: Boolean,
+    palette: Int,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Card(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = if (selected) scheme.secondaryContainer else scheme.surfaceContainerLow),
+        border = if (selected) androidx.compose.foundation.BorderStroke(1.5.dp, scheme.primary) else null,
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            PixelPetPreview(species, palette, Modifier.size(58.dp))
+            Text(species.title, style = MaterialTheme.typography.labelLarge, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+            if (selected) Text("Выбрано", style = MaterialTheme.typography.labelSmall, color = scheme.primary)
+            else Spacer(Modifier.height(14.dp))
+        }
+    }
+}
+
+@Composable
+private fun PaletteSwatch(color: Color, selected: Boolean, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier
+            .size(38.dp)
+            .clip(CircleShape)
+            .background(color)
+            .then(if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (selected) Text("✓", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+    }
+}
+
+@Composable
+private fun SettingSwitchRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange).padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = if (checked) scheme.primary else scheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(13.dp))
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+@Composable
+private fun StatTile(title: String, value: String, emoji: String, modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        modifier.clip(RoundedCornerShape(17.dp)).background(scheme.surface).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(emoji, fontSize = 19.sp)
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(title, style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun PixelPetPreview(species: PetSpecies, palette: Int, modifier: Modifier = Modifier) {
+    val bodyColors = listOf(
+        Color(0xFFD97757), Color(0xFF4FBF98), Color(0xFF9B8AEE), Color(0xFF4FA8E8), Color(0xFFEE85AE), Color(0xFF5E6670),
+    )
+    val body = bodyColors[palette.coerceIn(bodyColors.indices)]
+    val shadow = body.copy(alpha = 0.78f)
+    val eye = if (palette == 5) Color(0xFFF2F2F2) else Color(0xFF241916)
+    Canvas(modifier) {
+        val cell = min(size.width / 18f, size.height / 17f)
+        if (cell <= 0f) return@Canvas
+        val top = cell * 2f
+        fun pixel(x: Int, y: Int, w: Int = 1, h: Int = 1, color: Color = body) {
+            drawRect(color, Offset(x * cell, top + y * cell), Size(w * cell, h * cell))
+        }
+        when (species) {
+            PetSpecies.CAT -> {
+                pixel(14, 8, color = shadow); pixel(15, 7); pixel(16, 6, 1, 2, shadow)
+                pixel(4, 2, 1, 2, shadow); pixel(5, 1, 2); pixel(6, 0, color = shadow)
+                pixel(12, 1, 2); pixel(14, 2, 1, 2, shadow)
+                pixel(6, 2, color = Color(0xFFFFB1B8)); pixel(13, 2, color = Color(0xFFFFB1B8))
+            }
+            PetSpecies.DOG -> {
+                pixel(14, 6, 2, 1, shadow); pixel(15, 5, 2); pixel(16, 6, 1, 2, shadow)
+                pixel(2, 3, 2, 3, shadow); pixel(3, 6, 2, 2, shadow); pixel(14, 3, 2, 3, shadow)
+            }
+            PetSpecies.CLAWD -> Unit
+        }
+        val starts = intArrayOf(5, 4, 3, 3, 3, 3, 3, 4, 5)
+        starts.forEachIndexed { row, start -> pixel(start, row + 2, 18 - start * 2, color = body) }
+        pixel(4, 4, 2, 1, body.copy(alpha = 0.55f))
+        pixel(5, 11, color = body); pixel(8, 11, color = body); pixel(11, 11, color = body); pixel(14, 11, color = body)
+        pixel(5, 12, color = body); pixel(8, 12, color = body); pixel(11, 12, color = body); pixel(14, 12, color = body)
+        pixel(1, 7, 2, 2, body); pixel(15, 7, 2, 2, body)
+        pixel(6, 5, color = eye); pixel(11, 5, color = eye)
+        pixel(6, 6, color = eye); pixel(11, 6, color = eye)
+        if (species == PetSpecies.DOG) {
+            pixel(8, 7, 2, 1, Color(0xFFFFDAB7)); pixel(9, 7, color = eye)
+        } else {
+            pixel(8, 7, 2, 1, eye)
+        }
+        pixel(4, 7, 2, 1, Color(0x80FF6A84)); pixel(12, 7, 2, 1, Color(0x80FF6A84))
+    }
+}
+
+private fun hasNotificationAccess(context: Context): Boolean {
+    val enabled = Secure.getString(context.contentResolver, "enabled_notification_listeners") ?: return false
+    return enabled.split(':').any { it.contains(context.packageName) }
+}
+
+private fun dispatchPetAction(context: Context, action: String, scope: CoroutineScope, snackbar: SnackbarHostState) {
+    try {
+        val intent = Intent(context, OverlayPetService::class.java).setAction(action)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ContextCompat.startForegroundService(context, intent)
+        else context.startService(intent)
+    } catch (_: Exception) {
+        scope.launch { snackbar.showSnackbar("Не удалось запустить питомца. Проверь разрешения Android.") }
+    }
+}
+
+private val PALETTE_COLORS = listOf(
+    Color(0xFFD97757), Color(0xFF4FBF98), Color(0xFF9B8AEE), Color(0xFF4FA8E8), Color(0xFFEE85AE), Color(0xFF5E6670),
+)

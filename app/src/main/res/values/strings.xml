@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">PixPet</string>
+    <string name="app_subtitle">Пиксельный питомец</string>
+    <string name="notification_title">PixPet активен</string>
+    <string name="notification_text">Питомец отображается поверх приложений</string>
+    <string name="notification_stop">Остановить</string>
+</resources>
