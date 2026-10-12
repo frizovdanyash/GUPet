@@ -1,5 +1,5 @@
-# Gradle / Android build products
 .gradle/
+.kotlin/
 **/build/
 local.properties
 *.apk
@@ -7,7 +7,6 @@ local.properties
 *.jks
 *.keystore
 
-# IDE and local machine state
 .idea/
 *.iml
 .DS_Store

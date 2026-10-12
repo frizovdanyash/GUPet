@@ -11,7 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
-private val PixPetLight = lightColorScheme(
+private val GUPetLight = lightColorScheme(
     primary = Color(0xFF93543E),
     onPrimary = Color(0xFFFFFFFF),
     primaryContainer = Color(0xFFFFDBCC),
@@ -34,7 +34,7 @@ private val PixPetLight = lightColorScheme(
     outlineVariant = Color(0xFFD8C2B9),
 )
 
-private val PixPetDark = darkColorScheme(
+private val GUPetDark = darkColorScheme(
     primary = Color(0xFFFFB59A),
     onPrimary = Color(0xFF5A1D08),
     primaryContainer = Color(0xFF78351F),
@@ -58,11 +58,11 @@ private val PixPetDark = darkColorScheme(
 )
 
 @Composable
-fun PixPetTheme(content: @Composable () -> Unit) {
+fun GUPetTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val dark = isSystemInDarkTheme()
     val scheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-    } else if (dark) PixPetDark else PixPetLight
+    } else if (dark) GUPetDark else GUPetLight
     MaterialTheme(colorScheme = scheme, content = content)
 }

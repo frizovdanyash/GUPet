@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Документация GUPet: настройка питомца и создание пользовательских скинов .gupet.">
+  <title>GUPet — документация</title>
+  <style>
+    :root { color-scheme: light dark; --bg: #f6f2ee; --card: #fffdfb; --ink: #241a16; --muted: #635650; --accent: #93543e; --soft: #f0ded5; --line: #e5d8d1; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #171311; --card: #211b18; --ink: #f4e8e2; --muted: #cbbab1; --accent: #ffb59a; --soft: #49352e; --line: #4c3c35; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { width: min(880px, calc(100% - 32px)); margin: 0 auto; padding: 34px 0 48px; }
+    header { padding: 30px; border-radius: 28px; background: linear-gradient(135deg, var(--soft), var(--card)); margin-bottom: 18px; }
+    h1 { margin: 0 0 8px; font-size: clamp(2rem, 6vw, 3.25rem); line-height: 1.1; letter-spacing: -.04em; }
+    h2 { margin: 0 0 12px; font-size: 1.45rem; }
+    h3 { margin: 20px 0 8px; font-size: 1.08rem; }
+    p { margin: 9px 0; }
+    .muted { color: var(--muted); }
+    nav { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 20px; }
+    nav a, .button { display: inline-block; padding: 8px 13px; border: 1px solid var(--line); border-radius: 999px; color: var(--accent); text-decoration: none; font-weight: 650; }
+    section { margin: 14px 0; padding: 23px; border: 1px solid var(--line); border-radius: 22px; background: var(--card); }
+    ul, ol { padding-left: 24px; }
+    li { padding: 2px 0; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    code { padding: 2px 5px; border-radius: 6px; background: var(--soft); overflow-wrap: anywhere; }
+    pre { overflow-x: auto; padding: 17px; border-radius: 15px; background: var(--bg); border: 1px solid var(--line); line-height: 1.5; }
+    pre code { padding: 0; background: transparent; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+    th, td { padding: 9px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--accent); }
+    .note { padding: 12px 15px; border-left: 4px solid var(--accent); border-radius: 8px; background: var(--bg); }
+    footer { padding: 20px 4px 0; color: var(--muted); }
+    footer strong { display: block; color: var(--ink); }
+    @media (max-width: 560px) { main { width: min(100% - 20px, 880px); padding-top: 12px; } header, section { padding: 18px; border-radius: 20px; } table { font-size: .9rem; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>GUPet</h1>
+    <p class="muted">Инструкция по настройке питомца и созданию пользовательских скинов.</p>
+    <nav aria-label="Разделы документации">
+      <a href="#start">Начало работы</a>
+      <a href="#controls">Управление</a>
+      <a href="#skins">Скины .gupet</a>
+      <a href="#privacy">Хранение данных</a>
+    </nav>
+  </header>
+
+  <section id="start">
+    <h2>Первое включение</h2>
+    <ol>
+      <li>Установите приложение и нажмите <strong>«Позвать питомца»</strong>.</li>
+      <li>В системном окне Android разрешите <strong>показывать поверх других приложений</strong>.</li>
+      <li>Вернитесь в GUPet. Питомец появится поверх открытых приложений.</li>
+      <li>Чтобы скрыть питомца, выключите его в настройках или остановите через постоянное уведомление.</li>
+    </ol>
+    <p>Доступ к уведомлениям необязателен. Он нужен для музыкальных реакций и выбранных пользователем реакций на уведомления. Звук не записывается.</p>
+  </section>
+
+  <section id="controls">
+    <h2>Управление питомцем</h2>
+    <ul>
+      <li>Касание — питомец отвечает.</li>
+      <li>Двойное касание — прыжок.</li>
+      <li>Удержание — поглаживание.</li>
+      <li>Перетаскивание — перемещение; бросок запускает короткий полёт.</li>
+      <li>Кнопка <strong>«Покакать сейчас»</strong> вызывает кучку в любой момент, даже если самостоятельные события выключены.</li>
+      <li>Касание кучки удаляет её, а кнопка <strong>«Убрать кучки»</strong> очищает все кучки.</li>
+    </ul>
+    <p>В настройках можно выбирать GUPet, кошку или собаку, менять окрас и размер, а также включать прогулки, реплики, гравитацию, вибрацию, музыкальные анимации и реакции на уведомления.</p>
+  </section>
+
+  <section id="skins">
+    <h2>Пользовательские скины .gupet</h2>
+    <p>Файл <code>.gupet</code> — ZIP-архив с расширением <code>.gupet</code>. В нём находятся только <code>manifest.json</code> и PNG-кадры; исполняемый код не поддерживается.</p>
+    <ul>
+      <li>Все файлы должны лежать в корне архива, без вложенных папок.</li>
+      <li>Обязателен файл <code>idle.png</code>; каждый PNG — ровно <strong>18 × 13 пикселей</strong>.</li>
+      <li>Подходит RGBA PNG с прозрачным фоном.</li>
+      <li>Распакованный архив — до 2 МБ, один PNG — до 512 КБ, манифест — до 16 КБ.</li>
+      <li>Можно добавить до девяти кадров: <code>idle</code>, <code>blink</code>, <code>happy</code>, <code>sleep</code>, <code>dance</code>, <code>surprised</code>, <code>dizzy</code>, <code>angry</code> и <code>love</code>.</li>
+    </ul>
+    <h3>Манифест</h3>
+    <pre><code>{
+  "format": "GUPet",
+  "formatVersion": 1,
+  "id": "mint-cat",
+  "name": "Мятный кот",
+  "author": "Автор скина",
+  "width": 18,
+  "height": 13,
+  "frames": {
+    "idle": "idle.png",
+    "blink": "blink.png",
+    "happy": "happy.png",
+    "sleep": "sleep.png",
+    "dance": "dance.png"
+  }
+}</code></pre>
+    <p>Идентификатор <code>id</code> должен состоять из строчных латинских букв, цифр, дефиса или подчёркивания; первый знак — буква или цифра, длина — до 40 знаков. Название — до 40 символов. Необязательные кадры заменяются кадром <code>idle</code>, если не добавлены.</p>
+    <h3>Как собрать и установить</h3>
+    <ol>
+      <li>Нарисуйте <code>idle.png</code> и, при желании, дополнительные кадры.</li>
+      <li>Сохраните PNG и манифест в корень ZIP-архива.</li>
+      <li>Создайте архив и переименуйте его, например, в <code>mint-cat.gupet</code>.</li>
+      <li>В приложении откройте <strong>«Пользовательские скины» → «Импорт .gupet»</strong>, выберите файл и нажмите на его карточку.</li>
+      <li>Удаление выполняется кнопкой корзины рядом с установленным скином.</li>
+    </ol>
+    <p class="note">Если повторно импортировать скин с тем же <code>id</code>, прежняя версия будет заменена.</p>
+    <p><a class="button" href="/pet/examples/GUPet-template.gupet" download>Скачать шаблон скина</a></p>
+    <p>Готовый образ цифрового помощника <strong>«Искра»</strong>: <a href="/pet/examples/Iskra.gupet" download>скачать .gupet</a> · <a href="/pet/examples/Iskra-preview.png">посмотреть превью</a>.</p>
+  </section>
+
+  <section id="privacy">
+    <h2>Хранение данных</h2>
+    <p>Настройки и импортированные изображения хранятся в закрытом хранилище приложения. Архив скина не отправляется в сеть. Удаление скина в приложении удаляет его локальные файлы.</p>
+  </section>
+
+  <footer>
+    <strong>by guteam.net</strong>
+    <strong>coder @frizovdanya</strong>
+  </footer>
+</main>
+</body>
+</html>

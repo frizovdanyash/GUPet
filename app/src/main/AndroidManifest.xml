@@ -13,7 +13,7 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
-        android:theme="@style/Theme.PixPet"
+        android:theme="@style/Theme.GUPet"
         android:usesCleartextTraffic="false">
 
         <activity
@@ -38,7 +38,7 @@
         <service
             android:name=".PetNotificationListenerService"
             android:exported="true"
-            android:label="PixPet — реакции на уведомления"
+            android:label="GUPet — реакции на уведомления"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />

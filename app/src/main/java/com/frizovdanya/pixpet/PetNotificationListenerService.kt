@@ -5,7 +5,6 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.os.SystemClock
 
-/** Optional Telegram-notification reactions; message text is checked locally and never retained. */
 class PetNotificationListenerService : NotificationListenerService() {
     private var lastEventKey: String? = null
     private var lastEventAt = 0L
@@ -39,9 +38,9 @@ class PetNotificationListenerService : NotificationListenerService() {
         lastEventKey = key
         lastEventAt = now
         sendBroadcast(
-            android.content.Intent(PixPetContract.ACTION_REACTION)
+            android.content.Intent(GUPetContract.ACTION_REACTION)
                 .setPackage(packageName)
-                .putExtra(PixPetContract.EXTRA_MOOD, mood),
+                .putExtra(GUPetContract.EXTRA_MOOD, mood),
         )
     }
 

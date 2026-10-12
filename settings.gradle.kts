@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "PixPet"
+rootProject.name = "GUPet"
 include(":app")

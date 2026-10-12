@@ -9,6 +9,8 @@ object PetPrefs {
     const val SHOW = "show"
     const val SPECIES = "species"
     const val PALETTE = "color"
+    const val CUSTOM_SKIN_ID = "custom_skin_id"
+    const val CUSTOM_SKIN_REVISION = "custom_skin_revision"
     const val SIZE_DP = "size_dp"
     const val WANDER = "wander"
     const val PHRASES = "phrases"
@@ -31,7 +33,7 @@ object PetPrefs {
 
     fun load(prefs: SharedPreferences): PetSettings = PetSettings(
         show = prefs.getBoolean(SHOW, false),
-        species = PetSpecies.fromKey(prefs.getString(SPECIES, PetSpecies.CLAWD.key)),
+        species = PetSpecies.fromKey(prefs.getString(SPECIES, PetSpecies.GUPET.key)),
         palette = prefs.getInt(PALETTE, 0).coerceIn(0, PetPalettes.names.lastIndex),
         sizeDp = prefs.getFloat(SIZE_DP, 4.0f).coerceIn(3.0f, 5.0f),
         wander = prefs.getBoolean(WANDER, true),
@@ -43,6 +45,8 @@ object PetPrefs {
         sleepMinutes = prefs.getInt(SLEEP_MINUTES, 3).coerceIn(0, 10),
         reactNotifications = prefs.getBoolean(REACT_NOTIFICATIONS, false),
         dance = prefs.getBoolean(DANCE, true),
+        customSkinId = prefs.getString(CUSTOM_SKIN_ID, null),
+        customSkinRevision = prefs.getLong(CUSTOM_SKIN_REVISION, 0L),
     )
 }
 
@@ -60,4 +64,6 @@ data class PetSettings(
     val sleepMinutes: Int,
     val reactNotifications: Boolean,
     val dance: Boolean,
+    val customSkinId: String?,
+    val customSkinRevision: Long,
 )

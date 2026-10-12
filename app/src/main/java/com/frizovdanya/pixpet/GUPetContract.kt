@@ -1,6 +1,6 @@
 package com.frizovdanya.pixpet
 
-object PixPetContract {
+object GUPetContract {
     const val ACTION_START = "com.frizovdanya.pixpet.action.START"
     const val ACTION_STOP = "com.frizovdanya.pixpet.action.STOP"
     const val ACTION_SETTINGS_CHANGED = "com.frizovdanya.pixpet.action.SETTINGS_CHANGED"

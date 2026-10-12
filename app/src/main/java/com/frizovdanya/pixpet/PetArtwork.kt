@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.RectF
 import android.view.View
 import kotlin.math.abs
 import kotlin.math.min
@@ -12,17 +13,13 @@ import kotlin.math.sin
 private const val GRID_W = 18
 private const val GRID_H = 13
 
-/**
- * Every pet is painted on a tiny, crisp pixel grid. The same renderer is used by the floating pet
- * and the previews in settings, so the selected skin always looks the same in both places.
- */
 enum class PetSpecies(val key: String, val title: String) {
-    CLAWD("clawd", "Clawd"),
+    GUPET("gupet", "GUPet"),
     CAT("cat", "Кошка"),
     DOG("dog", "Собака");
 
     companion object {
-        fun fromKey(key: String?): PetSpecies = entries.firstOrNull { it.key == key } ?: CLAWD
+        fun fromKey(key: String?): PetSpecies = entries.firstOrNull { it.key == key } ?: GUPET
     }
 }
 
@@ -92,10 +89,12 @@ internal data class PetParticle(
 )
 
 class PetArtView(context: Context) : View(context) {
-    internal var species: PetSpecies = PetSpecies.CLAWD
+    internal var species: PetSpecies = PetSpecies.GUPET
         set(value) { field = value; invalidate() }
     internal var paletteIndex: Int = 0
         set(value) { field = value.coerceIn(0, PetPalettes.names.lastIndex); invalidate() }
+    internal var customSkin: GUPetSkin? = null
+        set(value) { field = value; invalidate() }
     internal var frame: PetFrame = PetFrame()
         set(value) { field = value; invalidate() }
     internal var particles: List<PetParticle> = emptyList()
@@ -117,22 +116,28 @@ class PetArtView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        PetRenderer.draw(canvas, pixelPaint, width.toFloat(), height.toFloat(), species, paletteIndex, frame, frameTimeMs, particles)
+        PetRenderer.draw(canvas, pixelPaint, width.toFloat(), height.toFloat(), species, paletteIndex, frame, frameTimeMs, particles, customSkin)
     }
 }
 
 internal object PetRenderer {
     private val bodyLeft = intArrayOf(5, 4, 3, 2, 2, 2, 2, 2, 3, 4)
     private val bodyRight = intArrayOf(13, 14, 15, 16, 16, 16, 16, 16, 15, 14)
-    private val clawdBodyLeft = intArrayOf(5, 4, 3, 3, 3, 4, 5)
-    private val clawdBodyRight = intArrayOf(13, 14, 15, 15, 15, 14, 13)
+    private val gupetBodyLeft = intArrayOf(5, 4, 3, 3, 3, 4, 5)
+    private val gupetBodyRight = intArrayOf(13, 14, 15, 15, 15, 14, 13)
     private val legX = intArrayOf(4, 7, 11, 14)
-    private val clawdLegX = intArrayOf(4, 6, 11, 13)
+    private val gupetLegX = intArrayOf(4, 6, 11, 13)
     private val heart = arrayOf(".XX.XX.", "XXXXXXX", "XXXXXXX", ".XXXXX.", "..XXX..", "...X...")
     private val spark = arrayOf("..X..", "..X..", "XX.XX", "..X..", "..X..")
     private val star = arrayOf("..X..", ".XXX.", "XXXXX", ".XXX.", "..X..")
     private val zzz = arrayOf("XXXXX", "...X.", "..X..", ".X...", "XXXXX")
     private val note = arrayOf("..XXXXX", "..X...X", "..X...X", "..X...X", "XXX.XXX", "XXX.XXX")
+    private val bitmapPaint = Paint().apply {
+        style = Paint.Style.FILL
+        color = 0xFFFFFFFF.toInt()
+        isAntiAlias = false
+        isFilterBitmap = false
+    }
 
     fun draw(
         canvas: Canvas,
@@ -144,6 +149,7 @@ internal object PetRenderer {
         frame: PetFrame,
         nowMs: Long,
         particles: List<PetParticle>,
+        customSkin: GUPetSkin? = null,
     ) {
         if (width <= 0f || height <= 0f) return
         val unit = min(width / GRID_W, height / (GRID_H + 2f))
@@ -173,6 +179,15 @@ internal object PetRenderer {
         canvas.translate(0f, frame.hopOffset - idleBreath - danceBob)
         canvas.scale(squashX, squashY, centerX, centerY)
 
+        if (customSkin != null) {
+            val bitmap = customSkin.frameFor(frame)
+            val destination = RectF(0f, topPad, GRID_W * unit, topPad + GRID_H * unit)
+            canvas.drawBitmap(bitmap, null, destination, bitmapPaint)
+            drawParticles(canvas, paint, unit, nowMs, particles)
+            canvas.restore()
+            return
+        }
+
         val body = PetPalettes.body(palette)
         val eye = PetPalettes.eye(palette)
         val shade = PetPalettes.shade(palette)
@@ -185,8 +200,6 @@ internal object PetRenderer {
             species == PetSpecies.DOG -> if (alternate == 0) 1 else -1
             else -> 0
         }
-
-        // Tail and ears sit behind the body and wag at different speeds for each animal.
         when (species) {
             PetSpecies.CAT -> {
                 px(canvas, paint, 14, 8, 2, 1, outline, unit, topPad)
@@ -210,18 +223,16 @@ internal object PetRenderer {
                 px(canvas, paint, 13, 3, 3, 4, shade, unit, topPad)
                 px(canvas, paint, 3, 4, 1, 2, highlight, unit, topPad)
             }
-            PetSpecies.CLAWD -> Unit
+            PetSpecies.GUPET -> Unit
         }
-
-        // Soft pixel shadow makes the feet feel grounded without a bitmap or per-frame allocation.
         paint.color = 0x55352520
         canvas.drawRect(unit * 4f, topPad + unit * 12.5f, unit * 14f, topPad + unit * 13f, paint)
         paint.color = 0xFF000000.toInt()
 
         val outlineExpansion = if (frame.pose == PetPose.PET || frame.pose == PetPose.STRETCH) 1 else 0
-        val activeLeft = if (species == PetSpecies.CLAWD) clawdBodyLeft else bodyLeft
-        val activeRight = if (species == PetSpecies.CLAWD) clawdBodyRight else bodyRight
-        val bodyStartY = if (species == PetSpecies.CLAWD) 3 else 2
+        val activeLeft = if (species == PetSpecies.GUPET) gupetBodyLeft else bodyLeft
+        val activeRight = if (species == PetSpecies.GUPET) gupetBodyRight else bodyRight
+        val bodyStartY = if (species == PetSpecies.GUPET) 3 else 2
         for (row in activeLeft.indices) {
             val y = row + bodyStartY
             val left = activeLeft[row] - outlineExpansion
@@ -234,8 +245,8 @@ internal object PetRenderer {
 
         val walk = frame.pose == PetPose.WALK || frame.pose == PetPose.PEEK || frame.pose == PetPose.DRAG
         val step = ((frame.phase * 8f).toInt() and 1)
-        val activeLegs = if (species == PetSpecies.CLAWD) clawdLegX else legX
-        val legY = if (species == PetSpecies.CLAWD) 10 else 11
+        val activeLegs = if (species == PetSpecies.GUPET) gupetLegX else legX
+        val legY = if (species == PetSpecies.GUPET) 10 else 11
         for (i in activeLegs.indices) {
             val footHeight = if (frame.pose == PetPose.SLEEP) 1 else if (walk && ((i + step) and 1) == 0) 2 else 1
             px(canvas, paint, activeLegs[i], legY, 2, footHeight, outline, unit, topPad)
@@ -249,7 +260,7 @@ internal object PetRenderer {
         drawArm(canvas, paint, side = -1, raised = armsUp || frame.waveSide < 0 || groomLeft, body = body, outline = outline, highlight = highlight, unit = unit, top = topPad)
         drawArm(canvas, paint, side = 1, raised = armsUp || frame.waveSide > 0 || groomRight, body = body, outline = outline, highlight = highlight, unit = unit, top = topPad)
 
-        val leftEye = (if (species == PetSpecies.CLAWD) 6 else 5) + frame.look.coerceIn(-1, 1)
+        val leftEye = (if (species == PetSpecies.GUPET) 6 else 5) + frame.look.coerceIn(-1, 1)
         val rightEye = 11 + frame.look.coerceIn(-1, 1)
         val eyeY = 5
         val expression = if (frame.pose == PetPose.SLEEP || frame.pose == PetPose.YAWN) PetExpression.SLEEP else frame.expression
@@ -263,7 +274,6 @@ internal object PetRenderer {
 
         when (species) {
             PetSpecies.DOG -> {
-                // A cream muzzle, button nose and a tiny smiling tongue.
                 px(canvas, paint, 7, 7, 4, 2, 0xFFFFE2BE.toInt(), unit, topPad)
                 px(canvas, paint, 8, 7, 2, 1, outline, unit, topPad)
                 if (frame.mouthOpen || frame.pose == PetPose.YAWN) px(canvas, paint, 8, 8, 2, 1, 0xFFEA6688.toInt(), unit, topPad)
@@ -273,7 +283,7 @@ internal object PetRenderer {
                 px(canvas, paint, 7, 8, 2, 1, outline, unit, topPad)
                 if (frame.mouthOpen || frame.pose == PetPose.YAWN) px(canvas, paint, 8, 8, 1, 1, 0xFFEA6688.toInt(), unit, topPad)
             }
-            PetSpecies.CLAWD -> {
+            PetSpecies.GUPET -> {
                 if (frame.mouthOpen || frame.pose == PetPose.YAWN) {
                     px(canvas, paint, 8, 7, 2, 2, outline, unit, topPad)
                     px(canvas, paint, 8, 8, 2, 1, 0xFFEA6688.toInt(), unit, topPad)
@@ -284,16 +294,7 @@ internal object PetRenderer {
             }
         }
 
-        // Sparkles, hearts, Zs and music notes use the same crisp pixel grid.
-        for (particle in particles) {
-            val elapsed = (nowMs - particle.bornAtMs).coerceAtLeast(0L)
-            val progress = (elapsed.toFloat() / particle.durationMs.coerceAtLeast(1L)).coerceIn(0f, 1f)
-            val alpha = (255f * (1f - progress)).toInt()
-            val cell = unit * 0.72f
-            val x = particle.x + particle.driftX * progress
-            val y = particle.y - unit * (2.5f * progress)
-            drawParticle(canvas, paint, particle.kind, x, y, cell, alpha)
-        }
+        drawParticles(canvas, paint, unit, nowMs, particles)
         canvas.restore()
     }
 
@@ -311,7 +312,7 @@ internal object PetRenderer {
     }
 
     private fun drawEye(canvas: Canvas, paint: Paint, x: Int, y: Int, color: Int, outline: Int, expression: PetExpression, unit: Float, top: Float, species: PetSpecies) {
-        if (species == PetSpecies.CLAWD) {
+        if (species == PetSpecies.GUPET) {
             when (expression) {
                 PetExpression.BLINK, PetExpression.SLEEP -> px(canvas, paint, x - 1, y + 1, 3, 1, color, unit, top)
                 PetExpression.HAPPY -> {
@@ -383,6 +384,18 @@ internal object PetRenderer {
                 px(canvas, paint, x, y + 1, 1, 2, color, unit, top)
                 px(canvas, paint, x - 1, y, 1, 1, 0xFFFFFFFF.toInt(), unit, top)
             }
+        }
+    }
+
+    private fun drawParticles(canvas: Canvas, paint: Paint, unit: Float, nowMs: Long, particles: List<PetParticle>) {
+        for (particle in particles) {
+            val elapsed = (nowMs - particle.bornAtMs).coerceAtLeast(0L)
+            val progress = (elapsed.toFloat() / particle.durationMs.coerceAtLeast(1L)).coerceIn(0f, 1f)
+            val alpha = (255f * (1f - progress)).toInt()
+            val cell = unit * 0.72f
+            val x = particle.x + particle.driftX * progress
+            val y = particle.y - unit * (2.5f * progress)
+            drawParticle(canvas, paint, particle.kind, x, y, cell, alpha)
         }
     }
 

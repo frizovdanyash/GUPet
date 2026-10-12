@@ -48,10 +48,6 @@ import kotlin.math.min
 import kotlin.math.sin
 import kotlin.random.Random
 
-/**
- * Keeps the small touchable pet window alive over other apps. No accessibility or screen-capture
- * access is used: only the pet's own window receives touches; all other areas remain clickable.
- */
 class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSharedPreferenceChangeListener {
     private enum class State { IDLE, WALK, PRESS, DRAG, PET, FLY, SLEEP, HANG, PEEK }
     private data class TouchPoint(val timeMs: Long, val x: Float, val y: Float)
@@ -73,7 +69,7 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
     private lateinit var windowManager: WindowManager
     private var settings = PetSettings(
         show = false,
-        species = PetSpecies.CLAWD,
+        species = PetSpecies.GUPET,
         palette = 0,
         sizeDp = 4f,
         wander = true,
@@ -85,6 +81,8 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
         sleepMinutes = 3,
         reactNotifications = false,
         dance = true,
+        customSkinId = null,
+        customSkinRevision = 0L,
     )
 
     private var petView: PetArtView? = null
@@ -105,8 +103,8 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
     private val privateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                PixPetContract.ACTION_REACTION -> reactToNotification(intent.getStringExtra(PixPetContract.EXTRA_MOOD) ?: "mail")
-                PixPetContract.ACTION_MEDIA -> setMediaPlaying(intent.getBooleanExtra(PixPetContract.EXTRA_PLAYING, false))
+                GUPetContract.ACTION_REACTION -> reactToNotification(intent.getStringExtra(GUPetContract.EXTRA_MOOD) ?: "mail")
+                GUPetContract.ACTION_MEDIA -> setMediaPlaying(intent.getBooleanExtra(GUPetContract.EXTRA_PLAYING, false))
             }
         }
     }
@@ -207,8 +205,8 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action ?: PixPetContract.ACTION_START
-        if (action == PixPetContract.ACTION_STOP) {
+        val action = intent?.action ?: GUPetContract.ACTION_START
+        if (action == GUPetContract.ACTION_STOP) {
             prefs.edit().putBoolean(PetPrefs.SHOW, false).apply()
             stopSelf()
             return START_NOT_STICKY
@@ -231,10 +229,10 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
         }
 
         when (action) {
-            PixPetContract.ACTION_POOP_NOW -> poopNow(manual = true)
-            PixPetContract.ACTION_CLEAN_POOPS -> cleanAllPoops(animated = true)
-            PixPetContract.ACTION_RECENTER -> recenter()
-            PixPetContract.ACTION_SETTINGS_CHANGED -> applySettings(PetPrefs.load(prefs))
+            GUPetContract.ACTION_POOP_NOW -> poopNow(manual = true)
+            GUPetContract.ACTION_CLEAN_POOPS -> cleanAllPoops(animated = true)
+            GUPetContract.ACTION_RECENTER -> recenter()
+            GUPetContract.ACTION_SETTINGS_CHANGED -> applySettings(PetPrefs.load(prefs))
         }
         registerSensorIfNeeded()
         updateMediaMonitor()
@@ -293,6 +291,9 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
         if (view != null) {
             view.species = fresh.species
             view.paletteIndex = fresh.palette
+            if (old.customSkinId != fresh.customSkinId || old.customSkinRevision != fresh.customSkinRevision) {
+                view.customSkin = GUPetSkinStore.load(this, fresh.customSkinId)
+            }
             if (old.sizeDp != fresh.sizeDp) resizePetWindow()
         }
         if (old.poop && !fresh.poop) cleanAllPoops(animated = true, count = false)
@@ -316,8 +317,8 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
 
     private fun registerPrivateReceiver() {
         val filter = IntentFilter().apply {
-            addAction(PixPetContract.ACTION_REACTION)
-            addAction(PixPetContract.ACTION_MEDIA)
+            addAction(GUPetContract.ACTION_REACTION)
+            addAction(GUPetContract.ACTION_MEDIA)
         }
         ContextCompat.registerReceiver(this, privateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         receiverRegistered = true
@@ -338,7 +339,8 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
         val view = PetArtView(this).apply {
             species = settings.species
             paletteIndex = settings.palette
-            contentDescription = "Пиксельный питомец"
+            customSkin = GUPetSkinStore.load(this@OverlayPetService, settings.customSkinId)
+            contentDescription = "Питомец GUPet"
             setOnClickListener { onTap(SystemClock.elapsedRealtime()) }
             setOnTouchListener { touchedView, event ->
                 val isShortTap = event.actionMasked == MotionEvent.ACTION_UP && state == State.PRESS &&
@@ -386,7 +388,7 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
             this.width = width
             this.height = height
             packageName = this@OverlayPetService.packageName
-            title = "PixPet"
+            title = "GUPet"
         }
     }
 
@@ -929,8 +931,6 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
                             endPet(now)
                         } else {
                             state = State.IDLE
-                            // The touch listener forwards a short tap through performClick(),
-                            // which also keeps accessibility services able to trigger the same action.
                         }
                     }
                     else -> state = State.IDLE
@@ -1083,7 +1083,7 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
     }
 
     private fun poopNow(manual: Boolean) {
-        if (!settings.poop || petView == null) return
+        if ((!manual && !settings.poop) || petView == null) return
         val now = SystemClock.elapsedRealtime()
         nextPoopAt = now + randomBetween(150_000L, 360_000L)
         if (poops.size >= MAX_POOPS) {
@@ -1103,7 +1103,7 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
             x = px.toInt()
             y = py.toInt()
             alpha = 1f
-            title = "PixPet — убрать кучку"
+            title = "GUPet — убрать кучку"
         }
         try {
             windowManager.addView(view, params)
@@ -1215,7 +1215,7 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
         val height = view.measuredHeight.coerceAtLeast(dp(30f))
         val params = bubbleParams ?: overlayParams(width, height, touchable = false).apply {
             alpha = 0.78f
-            title = "PixPet — реплика"
+            title = "GUPet — реплика"
         }.also { bubbleParams = it }
         params.width = width
         params.height = height
@@ -1650,7 +1650,7 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
         val manager = getSystemService(NotificationManager::class.java) ?: return
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Питомец PixPet", NotificationManager.IMPORTANCE_LOW).apply {
+            NotificationChannel(CHANNEL_ID, "Питомец GUPet", NotificationManager.IMPORTANCE_LOW).apply {
                 description = "Показывает, что питомец работает поверх приложений"
                 setShowBadge(false)
             },
@@ -1667,7 +1667,7 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
         val stopIntent = PendingIntent.getService(
             this,
             1,
-            Intent(this, OverlayPetService::class.java).setAction(PixPetContract.ACTION_STOP),
+            Intent(this, OverlayPetService::class.java).setAction(GUPetContract.ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -1697,7 +1697,7 @@ class OverlayPetService : Service(), SensorEventListener, SharedPreferences.OnSh
         private const val EARTH_G = 9.81f
 
         private val PHRASES = mapOf(
-            "hello" to listOf("Привет!", "Я PixPet!", "О, это ты!", "Ну здравствуй, человек", "Я уже заждался", "Давай проведём день вместе", "Мяу! То есть… привет!", "Привет-привет, я на посту!"),
+            "hello" to listOf("Привет!", "Я GUPet!", "О, это ты!", "Ну здравствуй, человек", "Я уже заждался", "Давай проведём день вместе", "Мяу! То есть… привет!", "Привет-привет, я на посту!"),
             "idle" to listOf("Чем займёмся?", "Хм…", "Думаю…", "Можно я тут посижу?", "Не забудь попить воды", "Пип-пип!", "*оглядывается*", "Пишу код… шучу", "Интересно, что там дальше", "Я охраняю экран", "Кажется, я слышал шорох", "Кто-нибудь видел мой хвост?", "Пора размять лапки", "Проверка пикселей: всё на месте", "А у тебя уютный экран", "Я считаю облака. Раз… пиксель… два…", "Надо бы устроить маленькое приключение", "Я здесь, если что", "Люблю тихие минутки", "Кажется, день обещает быть хорошим", "Не отвлекайся, я присмотрю за всем", "Хочу чего-нибудь интересного", "*подмигивает*", "Секунду, я красиво сяду", "Какой сегодня чудесный фон!", "Здесь так много места для прогулки", "Пиксель к пикселю — и красота", "У меня лапки, но планы большие", "Ты занят? Я могу подождать", "Пожалуй, немного помурчу"),
             "tap" to listOf("Ой!", "Эй!", "Чего?", "Я тут!", "Хи!", "Поймал!", "Это было неожиданно", "Тук-тук, я отвечаю", "Лапкой привет!", "Не щекочи меня", "Опять ты!", "Ты хотел что-то сказать?"),
             "annoyed" to listOf("Хватит тыкать!", "Щекотно же!", "Ну всё, обиделся", "Эй, полегче!", "Я вообще-то нежный", "Лапки просят передышку", "Ещё раз — и я спрячусь", "Так, это уже третий тык!", "Осторожно, я могу рассмеяться", "Ну ладно, ещё разок"),
